@@ -14,6 +14,9 @@ import seaborn as sns
 
 from spam_classifier.data import download_dataset, load_dataset
 from spam_classifier.predict import load_artifacts, predict
+import joblib
+from sklearn.utils.validation import check_is_fitted
+from sklearn.exceptions import NotFittedError
 
 MODEL_DIR = Path("models")
 
@@ -41,6 +44,25 @@ def main():
 
     st.header("Model & Metrics")
     metrics_path = MODEL_DIR / "metrics.json"
+    # --- Debug: show model artifact presence and fitted state ---
+    st.subheader("Model artifacts debug")
+    try:
+        vec_path = MODEL_DIR / "vectorizer.pkl"
+        model_path = MODEL_DIR / "model.pkl"
+        st.write("vectorizer exists:", vec_path.exists(), "size:", vec_path.stat().st_size if vec_path.exists() else None)
+        st.write("model exists:", model_path.exists(), "size:", model_path.stat().st_size if model_path.exists() else None)
+        if vec_path.exists():
+            try:
+                v = joblib.load(vec_path)
+                try:
+                    check_is_fitted(v)
+                    st.success("Vectorizer is fitted")
+                except Exception as e:
+                    st.error(f"Vectorizer not fitted or invalid: {e}")
+            except Exception as e:
+                st.error(f"Failed to load vectorizer.pkl: {e}")
+    except Exception as e:
+        st.warning(f"Model debug check failed: {e}")
     if metrics_path.exists():
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         st.json(metrics)
@@ -54,9 +76,14 @@ def main():
         if not MODEL_DIR.exists():
             st.error("Model not found. Train first.")
         else:
-            result = predict(text, threshold=threshold, model_dir=MODEL_DIR)
-            st.write("Probability (spam):", result["probability"])
-            st.write("Label:", result["label"])
+            try:
+                result = predict(text, threshold=threshold, model_dir=MODEL_DIR)
+                st.write("Probability (spam):", result["probability"])
+                st.write("Label:", result["label"])
+            except NotFittedError as e:
+                st.error("Model or vectorizer is not fitted. This usually means the uploaded artifacts are not the trained files. Please ensure `models/vectorizer.pkl` and `models/model.pkl` are the trained artefacts (not 404 HTML or empty files).\nCheck the 'Model artifacts debug' section above for details.")
+            except Exception as e:
+                st.error(f"Prediction failed: {e}")
 
 
 if __name__ == "__main__":
