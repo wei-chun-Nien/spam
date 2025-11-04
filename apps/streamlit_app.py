@@ -17,34 +17,31 @@ sys.path.append(str(ROOT / "src"))
 from spam_classifier.data import download_dataset, load_dataset
 from spam_classifier.predict import predict
 
-# 絕對路徑
+# 使用絕對路徑
 MODEL_DIR = ROOT / "models"
 
-
-def load_vectorizer_and_model():
+def load_vectorizer():
+    """
+    只檢查 vectorizer 是否存在和已 fit。
+    model 不檢查 fit，避免 CalibratedClassifierCV 引發 AttributeError。
+    """
     vec_path = MODEL_DIR / "vectorizer.pkl"
     model_path = MODEL_DIR / "model.pkl"
 
     if not vec_path.exists() or not model_path.exists():
-        return None, None, "Model files not found. Make sure vectorizer.pkl and model.pkl exist in models/"
+        return None, "Model files not found. Make sure vectorizer.pkl and model.pkl exist in models/"
 
     try:
         vectorizer = joblib.load(vec_path)
-        model = joblib.load(model_path)
     except Exception as e:
-        return None, None, f"Failed to load model artifacts: {e}"
+        return None, f"Failed to load vectorizer.pkl: {e}"
 
-    # 檢查是否已 fit
     try:
         check_is_fitted(vectorizer)
     except NotFittedError:
-        return None, None, "Vectorizer is not fitted. Upload the correct trained file."
-    try:
-        check_is_fitted(model)
-    except NotFittedError:
-        return None, None, "Classifier model is not fitted. Upload the correct trained file."
+        return None, "Vectorizer is not fitted. Upload the correct trained file."
 
-    return vectorizer, model, None
+    return vectorizer, None
 
 
 def main():
@@ -57,7 +54,7 @@ def main():
     st.write("vectorizer exists:", vec_path.exists(), "size:", vec_path.stat().st_size if vec_path.exists() else None)
     st.write("model exists:", model_path.exists(), "size:", model_path.stat().st_size if model_path.exists() else None)
 
-    vectorizer, model, error_msg = load_vectorizer_and_model()
+    vectorizer, error_msg = load_vectorizer()
     if error_msg:
         st.error(error_msg)
         st.stop()
@@ -95,7 +92,7 @@ def main():
             st.write("Probability (spam):", result["probability"])
             st.write("Label:", result["label"])
         except NotFittedError:
-            st.error("Model or vectorizer is not fitted. Check 'Model artifacts debug' above.")
+            st.error("Model is not fitted. Make sure you uploaded the trained model.pkl")
         except Exception as e:
             st.error(f"Prediction failed: {e}")
 
