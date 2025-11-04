@@ -2,6 +2,7 @@ import sys
 import pathlib
 from pathlib import Path
 import json
+import subprocess
 
 import streamlit as st
 import pandas as pd
@@ -11,7 +12,7 @@ import joblib
 
 # --- 確保 spam_classifier 可以被 import ---
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT))  # 假設 spam_classifier 在專案根目錄下
+sys.path.append(str(ROOT))
 
 from spam_classifier.data import download_dataset, load_dataset
 from spam_classifier.predict import predict
@@ -22,50 +23,59 @@ MODEL_DIR = Path("models")
 
 def check_vectorizer_and_model(vec_path, model_path):
     """
-    安全檢查 vectorizer 和 model 是否可用
-    - 不用 check_is_fitted，避免 AttributeError
-    - 直接測試 predict 一個簡單訊息
+    嘗試簡單測試 vectorizer 和 model 可用性
     """
     vectorizer_ok = False
     model_ok = False
 
-    # 檢查 vectorizer
-    if not vec_path.exists() or vec_path.stat().st_size == 0:
-        st.error(f"Vectorizer file not found or empty: {vec_path}")
-    else:
+    # vectorizer
+    if vec_path.exists() and vec_path.stat().st_size > 0:
         try:
             vec = joblib.load(vec_path)
-            # 嘗試轉換簡單文字測試
             vec.transform(["test"])
             vectorizer_ok = True
             st.success("Vectorizer is usable ✅")
         except Exception as e:
-            st.error(f"Vectorizer load/transform failed: {e}")
-
-    # 檢查 model
-    if not model_path.exists() or model_path.stat().st_size == 0:
-        st.error(f"Model file not found or empty: {model_path}")
+            st.warning(f"Vectorizer load/transform failed: {e}")
     else:
+        st.warning("Vectorizer not found or empty")
+
+    # model
+    if model_path.exists() and model_path.stat().st_size > 0:
         try:
             model = joblib.load(model_path)
-            # 嘗試對 dummy vector 做 predict
             if vectorizer_ok:
                 dummy = vec.transform(["test"])
                 model.predict(dummy)
                 model_ok = True
                 st.success("Model is usable ✅")
         except Exception as e:
-            st.error(f"Model load/predict failed: {e}")
+            st.warning(f"Model load/predict failed: {e}")
+    else:
+        st.warning("Model not found or empty")
 
     return vectorizer_ok and model_ok
+
+
+def train_model():
+    """
+    在 Streamlit 內呼叫 train.py 重新訓練模型
+    """
+    st.info("Training model... This may take a few minutes.")
+    try:
+        # 使用 subprocess 執行 train 模組
+        subprocess.run([sys.executable, "-m", "spam_classifier.train"], check=True)
+        st.success("Training finished! Model, vectorizer, and metrics.json updated ✅")
+    except subprocess.CalledProcessError as e:
+        st.error(f"Training failed: {e}")
 
 
 def main():
     st.title("Spam Classifier Demo (SVM)")
 
-    st.sidebar.header("Model Status")
-    if not MODEL_DIR.exists():
-        st.sidebar.warning("No trained model found. Run training first:\npython -m spam_classifier.train")
+    # --- 一鍵訓練按鈕 ---
+    if st.sidebar.button("Train / Retrain Model"):
+        train_model()
 
     # --- Data ---
     st.header("Data Overview")
@@ -97,7 +107,7 @@ def main():
         except Exception as e:
             st.error(f"Failed to load metrics.json: {e}")
     else:
-        st.info("Model metrics not found. Train a model to see metrics.")
+        st.info("Model metrics not found. Train the model to see metrics.")
 
     # --- Prediction ---
     st.header("Predict a Message")
@@ -106,7 +116,7 @@ def main():
 
     if st.button("Predict"):
         if not model_ready:
-            st.error("Model or vectorizer not usable. Cannot predict.")
+            st.error("Model or vectorizer not usable. Please train first.")
         elif not text.strip():
             st.warning("Please enter some text to classify.")
         else:
