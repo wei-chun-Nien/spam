@@ -1,37 +1,70 @@
 import sys
 import pathlib
-
-# Ensure `src/` is on sys.path so Streamlit Cloud (or other hosts) can import the package
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT / "src"))
-
 import streamlit as st
 import pandas as pd
 import json
 from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
-
-from spam_classifier.data import download_dataset, load_dataset
-from spam_classifier.predict import load_artifacts, predict
 import joblib
 from sklearn.utils.validation import check_is_fitted
 from sklearn.exceptions import NotFittedError
 
-MODEL_DIR = Path("models")
+# 確保 src/ 在 sys.path 中
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT / "src"))
+
+from spam_classifier.data import download_dataset, load_dataset
+from spam_classifier.predict import predict
+
+# 絕對路徑
+MODEL_DIR = ROOT / "models"
+
+
+def load_vectorizer_and_model():
+    vec_path = MODEL_DIR / "vectorizer.pkl"
+    model_path = MODEL_DIR / "model.pkl"
+
+    if not vec_path.exists() or not model_path.exists():
+        return None, None, "Model files not found. Make sure vectorizer.pkl and model.pkl exist in models/"
+
+    try:
+        vectorizer = joblib.load(vec_path)
+        model = joblib.load(model_path)
+    except Exception as e:
+        return None, None, f"Failed to load model artifacts: {e}"
+
+    # 檢查是否已 fit
+    try:
+        check_is_fitted(vectorizer)
+    except NotFittedError:
+        return None, None, "Vectorizer is not fitted. Upload the correct trained file."
+    try:
+        check_is_fitted(model)
+    except NotFittedError:
+        return None, None, "Classifier model is not fitted. Upload the correct trained file."
+
+    return vectorizer, model, None
 
 
 def main():
-    st.title("Spam classifier demo (SVM)")
+    st.title("Spam Classifier Demo (SVM)")
 
-    st.sidebar.header("Model")
-    if not MODEL_DIR.exists():
-        st.sidebar.warning("No trained model found. Run training first (python -m spam_classifier.train)")
+    # --- Model debug ---
+    st.subheader("Model artifacts debug")
+    vec_path = MODEL_DIR / "vectorizer.pkl"
+    model_path = MODEL_DIR / "model.pkl"
+    st.write("vectorizer exists:", vec_path.exists(), "size:", vec_path.stat().st_size if vec_path.exists() else None)
+    st.write("model exists:", model_path.exists(), "size:", model_path.stat().st_size if model_path.exists() else None)
 
-    # Data
+    vectorizer, model, error_msg = load_vectorizer_and_model()
+    if error_msg:
+        st.error(error_msg)
+        st.stop()
+
+    # --- Data ---
     csv = download_dataset()
     df = load_dataset(csv)
-
     st.header("Data overview")
     st.write(df.head())
 
@@ -42,48 +75,29 @@ def main():
     ax.set_ylabel("count")
     st.pyplot(fig)
 
+    # --- Metrics ---
     st.header("Model & Metrics")
     metrics_path = MODEL_DIR / "metrics.json"
-    # --- Debug: show model artifact presence and fitted state ---
-    st.subheader("Model artifacts debug")
-    try:
-        vec_path = MODEL_DIR / "vectorizer.pkl"
-        model_path = MODEL_DIR / "model.pkl"
-        st.write("vectorizer exists:", vec_path.exists(), "size:", vec_path.stat().st_size if vec_path.exists() else None)
-        st.write("model exists:", model_path.exists(), "size:", model_path.stat().st_size if model_path.exists() else None)
-        if vec_path.exists():
-            try:
-                v = joblib.load(vec_path)
-                try:
-                    check_is_fitted(v)
-                    st.success("Vectorizer is fitted")
-                except Exception as e:
-                    st.error(f"Vectorizer not fitted or invalid: {e}")
-            except Exception as e:
-                st.error(f"Failed to load vectorizer.pkl: {e}")
-    except Exception as e:
-        st.warning(f"Model debug check failed: {e}")
     if metrics_path.exists():
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         st.json(metrics)
     else:
         st.info("Model metrics not found. Train a model to see metrics.")
 
+    # --- Prediction ---
     st.header("Predict")
     text = st.text_area("Enter message to classify", height=150)
     threshold = st.slider("Decision threshold", 0.0, 1.0, 0.5)
+
     if st.button("Predict"):
-        if not MODEL_DIR.exists():
-            st.error("Model not found. Train first.")
-        else:
-            try:
-                result = predict(text, threshold=threshold, model_dir=MODEL_DIR)
-                st.write("Probability (spam):", result["probability"])
-                st.write("Label:", result["label"])
-            except NotFittedError as e:
-                st.error("Model or vectorizer is not fitted. This usually means the uploaded artifacts are not the trained files. Please ensure `models/vectorizer.pkl` and `models/model.pkl` are the trained artefacts (not 404 HTML or empty files).\nCheck the 'Model artifacts debug' section above for details.")
-            except Exception as e:
-                st.error(f"Prediction failed: {e}")
+        try:
+            result = predict(text, threshold=threshold, model_dir=MODEL_DIR)
+            st.write("Probability (spam):", result["probability"])
+            st.write("Label:", result["label"])
+        except NotFittedError:
+            st.error("Model or vectorizer is not fitted. Check 'Model artifacts debug' above.")
+        except Exception as e:
+            st.error(f"Prediction failed: {e}")
 
 
 if __name__ == "__main__":
